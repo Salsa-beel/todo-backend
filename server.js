@@ -1,17 +1,35 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const bcrypt= require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 // creating the server 
 const app = express();
 const PORT =  3000;
+const JWT_SECRET = 'your_secret_jwt_key'; 
+
 
 // middleware to understand the json bodies in the requests thats coming to the server
 
 app.use(express.json());
+const cors = require('cors');
+app.use(cors());
+
 
 const MONGODB_URI = 'mongodb://localhost:27017/todos';
 
 // schema
+const UserSchema = new mongoose.Schema({
+    username:{
+        type:String,
+        required:true
+    },
+    password:{
+        type:String,
+        required:true
+    }
+})
+
 const TodoSchema = new mongoose.Schema({
     task:{
         type: String,
@@ -20,13 +38,72 @@ const TodoSchema = new mongoose.Schema({
     completed: {
         type: Boolean,
         default: false
+    },
+    user:{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:'User',
+        required:true
     }
 });
 
+const User = mongoose.model('User', UserSchema)
 const Todo = mongoose.model('Todo', TodoSchema);
+
+// JWT middleware 
+
+const auth = (req,res, next)=>{
+    try {
+        const token = req.header('Authorization').replace('Bearer', '');
+        console.log(token);
+        const decoded = jwt.verify(token, JWT_SECRET);
+        console.log(decoded)
+        req.user = decoded;
+         next();
+    } catch (error) {
+        res.status(401).json({ error: 'Please authenticate.' });
+    }
+
+}
 // API ENDPOINTS //
 
-app.post('/todos',async(req, res) => {
+app.post('/register', async (req,res)=>{
+    try{
+        const {username , password}=req.body;
+        const hashedPass = await bcrypt.hash(password,8);
+        const newUser = new User({username,password:hashedPass})
+        await newUser.save();
+        res.status(200).json({message:'user registered successfully'})
+    }  catch (error) {
+        res.status(400).json({ error: 'Username already exists or failed to register.' });
+    }
+})
+
+
+
+app.post('/login',async(req,res)=>{
+
+    try{
+
+        const {username,password}=req.body;
+        const user =await User.findOne({username});
+        console.log(user)
+        if (!user){
+             return res.status(400).json({ error: 'Invalid credentials.' });
+        }
+        const isMatch = await bcrypt.compare(password,user.password);
+            if (!isMatch) {
+                        return res.status(400).json({ error: 'Invalid credentials.' });
+                    }
+                    const token = jwt.sign({id:user._id.toString()}, JWT_SECRET);
+                      res.status(200).json({ token });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to log in.' });
+    } 
+})
+
+
+
+app.post('/todos',auth, async(req, res) => {
 
 try {
     const {task} = req.body;
@@ -41,7 +118,7 @@ try {
 })
 
 
-app.get('/todos', async (req, res)=>{
+app.get('/todos', auth, async (req, res)=>{
 
     try {
         const allToDos = await Todo.find();
@@ -57,7 +134,7 @@ app.get('/todos', async (req, res)=>{
     }
 });
 
-app.put('/todos/:id', async(req, res) => {
+app.put('/todos/:id', auth, async(req, res) => {
 
     try{
         const {id} = req.params;
