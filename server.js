@@ -45,7 +45,13 @@ app.get('/todos', async (req, res)=>{
 
     try {
         const allToDos = await Todo.find();
-        res.status(200).json(allToDos);
+        const formattedTodos = allToDos.map( toDoItem => ({
+            id:toDoItem._id,
+              task: toDoItem.task,
+      completed: toDoItem.completed
+
+        }))
+        res.status(200).json(formattedTodos);
     }catch(err){
         res.status(401).json({error:err.message})
     }
