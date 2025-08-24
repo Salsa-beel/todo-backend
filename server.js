@@ -24,6 +24,10 @@ const UserSchema = new mongoose.Schema({
         type:String,
         required:true
     },
+    email:{
+        type:String,
+        required:true
+    },
     password:{
         type:String,
         required:true
@@ -64,13 +68,13 @@ const auth = (req,res, next)=>{
     }
 
 }
-// API ENDPOINTS //
+// Auth ENDPOINTS //
 
 app.post('/register', async (req,res)=>{
     try{
-        const {username , password}=req.body;
+        const {username , email, password }=req.body;
         const hashedPass = await bcrypt.hash(password,8);
-        const newUser = new User({username,password:hashedPass})
+        const newUser = new User({username,email, password:hashedPass})
         await newUser.save();
         res.status(200).json({message:'user registered successfully'})
     }  catch (error) {
@@ -102,12 +106,17 @@ app.post('/login',async(req,res)=>{
 })
 
 
+// API ENDPOINTS //
 
 app.post('/todos',auth, async(req, res) => {
 
 try {
     const {task} = req.body;
-    const newTodo = new Todo({task});
+    console.log('taskk',  {task} )
+    const newTodo = new Todo({
+        task,
+        user:req.user.id
+    });
     const savedTodo = await newTodo.save();
     res.status(201).json(savedTodo);
 
@@ -121,11 +130,11 @@ try {
 app.get('/todos', auth, async (req, res)=>{
 
     try {
-        const allToDos = await Todo.find();
+        const allToDos = await Todo.find({ user: req.user.id });
         const formattedTodos = allToDos.map( toDoItem => ({
-            id:toDoItem._id,
+              id:toDoItem._id,
               task: toDoItem.task,
-      completed: toDoItem.completed
+              completed: toDoItem.completed
 
         }))
         res.status(200).json(formattedTodos);
@@ -139,7 +148,7 @@ app.put('/todos/:id', auth, async(req, res) => {
     try{
         const {id} = req.params;
         const {task , completed} = req.body;
-        const updatedToDo = await Todo.findByIdAndUpdate(id, {task, completed}, {new:true});
+        const updatedToDo = await Todo.findOneAndUpdate(  { _id: id, user: req.user.id }, {task, completed}, {new:true});
   // If no todo was found with that ID, send a 404 status.
     if (!updatedToDo) {
       return res.status(404).json({ error: 'Todo not found' });
@@ -155,7 +164,7 @@ app.delete('/todos/:id' , async(req , res)=>{
 
     try {
         const {id}= req.params;
-        const deletedToDo = await Todo.findByIdAndDelete(id);
+        const deletedToDo = await Todo.findOneAndDelete({ _id: id, user: req.user.id });
         if(!deletedToDo){
             return res.status(404).json({error:'Todo not found'})
         }
