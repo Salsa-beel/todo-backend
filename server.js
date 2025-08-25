@@ -31,6 +31,14 @@ const UserSchema = new mongoose.Schema({
     password:{
         type:String,
         required:true
+    },
+    points:{
+        type:String,
+        default:0
+    },
+    level:{
+        type:String,
+        default:0
     }
 })
 
@@ -47,6 +55,14 @@ const TodoSchema = new mongoose.Schema({
         type:mongoose.Schema.Types.ObjectId,
         ref:'User',
         required:true
+    },
+    pointsValue:{
+        type:Number,
+        default:3
+    },
+    createdAt:{
+        type:Date,
+        default:Date.now
     }
 });
 
@@ -74,7 +90,7 @@ app.post('/register', async (req,res)=>{
     try{
         const {username , email, password }=req.body;
         const hashedPass = await bcrypt.hash(password,8);
-        const newUser = new User({username,email, password:hashedPass})
+        const newUser = new User({username,email, password:hashedPass , points:0, level:1});
         await newUser.save();
         res.status(200).json({message:'user registered successfully'})
     }  catch (error) {
@@ -108,7 +124,7 @@ app.post('/login',async(req,res)=>{
 
 // API ENDPOINTS //
 
-app.post('/todos',auth, async(req, res) => {
+app.post('/todos',auth, async(req,  res) => {
 
 try {
     const {task} = req.body;
@@ -134,7 +150,9 @@ app.get('/todos', auth, async (req, res)=>{
         const formattedTodos = allToDos.map( toDoItem => ({
               id:toDoItem._id,
               task: toDoItem.task,
-              completed: toDoItem.completed
+              completed: toDoItem.completed,
+              pointsValue: toDoItem.pointsValue,
+              createdAt: toDoItem.createdAt
 
         }))
         res.status(200).json(formattedTodos);
@@ -143,12 +161,29 @@ app.get('/todos', auth, async (req, res)=>{
     }
 });
 
+
+app.get('/user', auth, async (req, res)=>{
+
+    try {
+        const allUserData = await User.findById({ user:req.user.id });
+        const formattedUserData = allUserData.map( userItem => ({
+              id:userItem._id,
+              level: userItem.level,
+              points: userItem.points,
+        }))
+        res.status(200).json(formattedUserData);
+    }catch(err){
+        res.status(401).json({error:err.message})
+    }
+});
+
+
 app.put('/todos/:id', auth, async(req, res) => {
 
     try{
         const {id} = req.params;
-        const {task , completed} = req.body;
-        const updatedToDo = await Todo.findOneAndUpdate(  { _id: id, user: req.user.id }, {task, completed}, {new:true});
+        const {task} = req.body;
+        const updatedToDo = await Todo.findOneAndUpdate(  { _id: id, user: req.user.id }, {task}, {new:true});
   // If no todo was found with that ID, send a 404 status.
     if (!updatedToDo) {
       return res.status(404).json({ error: 'Todo not found' });
@@ -160,7 +195,60 @@ app.put('/todos/:id', auth, async(req, res) => {
 
 })
 
-app.delete('/todos/:id' , async(req , res)=>{
+app.put('/todos/:id/complete' , auth, async(req, res) => {
+
+    try{
+        const {id} = req.params;
+        const completedToDo = await Todo.findOneAndUpdate(
+            {_id:id , user:req.user.id},
+            {completed:true},
+            {new:true}
+        );  
+        console.log('completedToDo', completedToDo)
+
+        if(!completedToDo){
+             console.log('completedToDo', completedToDo)
+            return res.status(404).json({error:'Todo not found'})
+        }
+
+
+        const now = new Date();
+        const createdAt = completedToDo.createdAt;
+        console.log('createdAt', createdAt)
+        const hoursPassed = (now - createdAt) / (1000*60*60 ); // Convert milliseconds to hours
+        let pointsEarned = completedToDo.pointsValue;
+        const pointsToSubtract = Math.floor(hoursPassed / 3);
+        pointsEarned = Math.max(0,pointsEarned - pointsToSubtract)
+        console.log(`Task completed. Initial points: ${completedToDo.pointsValue}. Hours passed: ${hoursPassed.toFixed(2)}. Points subtracted: ${pointsToSubtract}. Points earned: ${pointsEarned}.`);
+
+
+
+const user = await User.findById(req.user.id);
+if(user){
+    const newPoints = user.points +pointsEarned;
+    let newLevel = user.level;
+        if(newPoints >= newLevel * 100){
+            newLevel ++;
+            console.log(`User ${user.username} leveled up to Level ${newLevel}!`);
+        }
+        await User.findByIdAndUpdate(req.user.id , {
+            $set:{
+                points:newPoints,
+                level:newLevel
+            }
+        })
+}
+
+
+    } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+
+
+} );
+
+
+app.delete('/todos/:id' ,auth, async(req , res)=>{
 
     try {
         const {id}= req.params;
