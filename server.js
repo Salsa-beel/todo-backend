@@ -33,11 +33,11 @@ const UserSchema = new mongoose.Schema({
         required:true
     },
     points:{
-        type:String,
+        type:Number,
         default:0
     },
     level:{
-        type:String,
+        type:Number,
         default:0
     }
 })
@@ -65,16 +65,33 @@ const TodoSchema = new mongoose.Schema({
         default:Date.now
     }
 });
-
+const BlacklistTokenSchema = new mongoose.Schema({
+    token: {
+        type: String,
+        required: true
+    },
+ 
+    createdAt: {
+        type: Date,
+        default: Date.now,
+        index: { expires: '1d' } // Expires in 1 day
+    }
+});
 const User = mongoose.model('User', UserSchema)
 const Todo = mongoose.model('Todo', TodoSchema);
+const BlacklistToken = mongoose.model('BlacklistToken', BlacklistTokenSchema);
 
 // JWT middleware 
 
-const auth = (req,res, next)=>{
+const auth = async (req,res, next)=>{
     try {
-        const token = req.header('Authorization').replace('Bearer', '');
+        const token = req.header('Authorization').replace('Bearer ', '');
         console.log(token);
+
+        const isBlackListed = await BlacklistToken.findOne({token});
+        if(isBlackListed){
+            return res.status(401).json({ error: 'Token is blacklisted. Please authenticate.' });
+        }
         const decoded = jwt.verify(token, JWT_SECRET);
         console.log(decoded)
         req.user = decoded;
@@ -121,10 +138,23 @@ app.post('/login',async(req,res)=>{
     } 
 })
 
+app.post('/logout', auth, async (req, res) => {
+
+    try{
+         const token = req.header('Authorization').replace('Bearer ', '');
+         const blacklistedToken = new BlacklistToken({ token });
+         await blacklistedToken.save();
+         res.status(200).json({ message: 'Logged out successfully' });
+
+    }catch (error) {
+        res.status(500).json({ error: 'Failed to log out.' });
+    
+    }
+})
 
 // API ENDPOINTS //
 
-app.post('/todos',auth, async(req,  res) => {
+app.post('/createTask',auth, async(req,  res) => {
 
 try {
     const {task} = req.body;
@@ -143,7 +173,27 @@ try {
 })
 
 
-app.get('/todos', auth, async (req, res)=>{
+app.get('/userScore', auth, async (req, res)=>{
+
+    try {
+        const userData = await User.findById(req.user.id );
+          if (!userData) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+     const formattedUserData = {
+      id: userData._id,
+      level: userData.level,
+      points: userData.points,
+    };
+    
+    res.status(200).json(formattedUserData);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/allTasks', auth, async (req, res)=>{
 
     try {
         const allToDos = await Todo.find({ user: req.user.id });
@@ -162,23 +212,9 @@ app.get('/todos', auth, async (req, res)=>{
 });
 
 
-app.get('/user', auth, async (req, res)=>{
-
-    try {
-        const allUserData = await User.findById({ user:req.user.id });
-        const formattedUserData = allUserData.map( userItem => ({
-              id:userItem._id,
-              level: userItem.level,
-              points: userItem.points,
-        }))
-        res.status(200).json(formattedUserData);
-    }catch(err){
-        res.status(401).json({error:err.message})
-    }
-});
 
 
-app.put('/todos/:id', auth, async(req, res) => {
+app.put('/taskById/:id', auth, async(req, res) => {
 
     try{
         const {id} = req.params;
@@ -195,7 +231,7 @@ app.put('/todos/:id', auth, async(req, res) => {
 
 })
 
-app.put('/todos/:id/complete' , auth, async(req, res) => {
+app.put('/taskById/:id/complete' , auth, async(req, res) => {
 
     try{
         const {id} = req.params;
@@ -237,6 +273,14 @@ if(user){
                 level:newLevel
             }
         })
+  const formattedUserData = {
+      id: user._id,
+      level: user.level,
+      points: user.points,
+    };
+    
+    res.status(200).json(formattedUserData);
+
 }
 
 
@@ -248,7 +292,7 @@ if(user){
 } );
 
 
-app.delete('/todos/:id' ,auth, async(req , res)=>{
+app.delete('/deleteById/:id' ,auth, async(req , res)=>{
 
     try {
         const {id}= req.params;
