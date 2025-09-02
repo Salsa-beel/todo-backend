@@ -65,6 +65,28 @@ const TodoSchema = new mongoose.Schema({
         default:Date.now
     }
 });
+
+const FriendshipSchema = new mongoose.Schema({
+    user:{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:'User',
+        required:true
+    },
+    friend:{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:'User',
+        required:true
+    },
+    status:{
+        type:String,
+        enum:['pending','accepted','rejected'],
+        default:'pending'
+    },
+    createdAt:{
+        type:Date,
+        default:Date.now
+    }
+});
 const BlacklistTokenSchema = new mongoose.Schema({
     token: {
         type: String,
@@ -78,6 +100,7 @@ const BlacklistTokenSchema = new mongoose.Schema({
     }
 });
 const User = mongoose.model('User', UserSchema)
+const Friendship = mongoose.model('Friendship', FriendshipSchema);
 const Todo = mongoose.model('Todo', TodoSchema);
 const BlacklistToken = mongoose.model('BlacklistToken', BlacklistTokenSchema);
 
@@ -101,6 +124,7 @@ const auth = async (req,res, next)=>{
     }
 
 }
+
 // Auth ENDPOINTS //
 
 app.post('/register', async (req,res)=>{
@@ -114,8 +138,6 @@ app.post('/register', async (req,res)=>{
         res.status(400).json({ error: 'Username already exists or failed to register.' });
     }
 })
-
-
 
 app.post('/login',async(req,res)=>{
 
@@ -154,6 +176,48 @@ app.post('/logout', auth, async (req, res) => {
 
 // API ENDPOINTS //
 
+app.get('/friends/pendingReq', auth, async (req,res)=>{
+try{
+
+    const pendingReq = await Friendship.find({friend:req.user.id, status:'pending'}).populate('user','username');
+    const formattedResponse = pendingReq.map(reqItem => ({
+        friendshipId: reqItem._id,
+        username: reqItem.user.username,
+        status: reqItem.status,
+        createdAt: reqItem.createdAt
+    }));
+
+    res.status(200).json(formattedResponse);
+}catch(err){
+    res.status(500).json({error:'Failed to fetch pending requests'})
+}
+});
+
+app.get('/friends/getAllFriends', auth, async (req,res)=>{
+
+    try{
+        const friends = await FriendshipSchema.find({user:req.user.id, status:'accepted'}).populate('friend','points');
+
+        const formattedResponse = friends.map(friendItem => ({
+            friendshipId: friendItem.friend}));
+            res.status(200).json(formattedResponse);    
+            
+    }catch(err){
+        res.status(500).json({error:'Failed to fetch friends'})
+    }
+});
+
+
+
+
+
+
+
+
+
+
+
+
 app.post('/createTask',auth, async(req,  res) => {
 
 try {
@@ -171,7 +235,6 @@ try {
 }
 
 })
-
 
 app.get('/userScore', auth, async (req, res)=>{
 
@@ -210,9 +273,6 @@ app.get('/allTasks', auth, async (req, res)=>{
         res.status(401).json({error:err.message})
     }
 });
-
-
-
 
 app.put('/taskById/:id', auth, async(req, res) => {
 
@@ -290,7 +350,6 @@ if(user){
 
 
 } );
-
 
 app.delete('/deleteById/:id' ,auth, async(req , res)=>{
 
