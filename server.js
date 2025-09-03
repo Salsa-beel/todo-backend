@@ -154,7 +154,9 @@ app.post('/login',async(req,res)=>{
                         return res.status(400).json({ error: 'Invalid credentials.' });
                     }
                     const token = jwt.sign({id:user._id.toString()}, JWT_SECRET);
-                      res.status(200).json({ token });
+                      res.status(200).json({   token,
+            userId: user._id, 
+            username: user.username  });
     } catch (error) {
         res.status(500).json({ error: 'Failed to log in.' });
     } 
@@ -193,22 +195,117 @@ try{
 }
 });
 
-app.get('/friends/getAllFriends', auth, async (req,res)=>{
+    app.get('/friends/getAllFriends', auth, async (req,res)=>{
+
+        try{
+              const userId = req.user.id;
+            const friends = await Friendship.find({
+            $or:[
+                
+                {user:userId, status:'accepted' },
+                {friend:userId, status:'accepted' }
+             ]   
+            
+            }).populate('friend user', 'username points');
+            console.log('friends line 200', friends)
+
+        
+            const formattedResponse = friends.map(friendItem => {
+             
+             const isUser = friendItem.user._id.toString() === userId.toString();
+            const friendData = isUser ? friendItem.friend : friendItem.user;
+             
+               return { 
+                friendshipId: friendItem._id,
+                friendId: friendData._id,
+                username: friendData.username,
+                points: friendData.points,
+                status: friendItem.status}
+            });
+                res.status(200).json(formattedResponse);    
+                
+        }catch(err){
+            res.status(500).json({error:'Failed  to fetch friends'})
+        }
+    });
+
+app.post('/friends/sendReq', auth, async (req,res)=>{
 
     try{
-        const friends = await FriendshipSchema.find({user:req.user.id, status:'accepted'}).populate('friend','points');
+        const {friendUsername} = req.body;
+        const userId = req.user.id;
+        const friend =  await User.findOne({username:friendUsername});
 
-        const formattedResponse = friends.map(friendItem => ({
-            friendshipId: friendItem.friend}));
-            res.status(200).json(formattedResponse);    
-            
+        if(!friend){
+            res.status(404).json({error:'User not found'})
+        }
+        if (friend._id.toString() === userId){
+            return res.status(400).json({error:'You cannot send a friend request to yourself'})
+        }
+
+        const existingFriendReq = await Friendship.findOne({
+            $or:[
+                {user:userId, friend:friend._id},
+                {user:friend._id, friend:userId}
+            ]
+        });
+         
+        
+        if(existingFriendReq){
+            res.status(404).json({error:'Friend request already sent or exists.'})
+        }
+
+         const newFriendship = new Friendship({
+            user: userId,
+            friend: friend._id,
+            status: 'pending'
+        });
+     await newFriendship.save();
+        res.status(201).json({ message: 'Friend request sent successfully.' });
     }catch(err){
-        res.status(500).json({error:'Failed to fetch friends'})
+        res.status(500).json({error:'Failed to send friend request'})
     }
 });
 
 
+app.post('/friends/respondReq', auth, async (req,res)=>{
+    try{
 
+        const {friendReqId, action} = req.body; // things the frontend will send
+       const userId = req.user.id;  // to know who is logged in
+       const friendship =  await Friendship.findById(friendReqId);
+       console.log('friendship', friendship)
+         if(!friendship){
+          return res.status(404).json({error:'Friend request not found'})
+         }
+
+            if(friendship.friend.toString() !== userId){
+                return res.status(403).json({error:'You are not authorized to respond to this friend request'})
+            }
+            
+            if (friendship.status !== 'pending') {
+            return res.status(400).json({ error: 'Request is no longer pending.' });
+        }
+
+        if( action === 'accept'){
+            friendship.status = 'accepted';
+            await friendship.save();
+            
+         
+
+            res.status(200).json({message:'Friend request accepted'})
+        }   else if( action ==='rejected'){
+         await Friendship.findByIdAndDelete(friendReqId);
+            res.status(200).json({message:'Friend request rejected'})
+        }else {
+            res.status(400).json({error:'Invalid action'})
+        }
+
+    }
+    catch(err){
+        res.status(500).json({error:'Failed to respond to friend request'})
+    }
+});
 
 
 
