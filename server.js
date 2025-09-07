@@ -206,7 +206,7 @@ try{
                 {friend:userId, status:'accepted' }
              ]   
             
-            }).populate('friend user', 'username points');
+            }).populate('friend user', 'username points level');
             console.log('friends line 200', friends)
 
         
@@ -219,8 +219,12 @@ try{
                 friendshipId: friendItem._id,
                 friendId: friendData._id,
                 username: friendData.username,
+                level: friendData.level,
                 points: friendData.points,
-                status: friendItem.status}
+                status: friendItem.status
+            
+            
+            }
             });
                 res.status(200).json(formattedResponse);    
                 
@@ -268,10 +272,11 @@ app.post('/friends/sendReq', auth, async (req,res)=>{
 });
 
 
-app.post('/friends/respondReq', auth, async (req,res)=>{
+app.put('/friends/respondReq', auth, async (req,res)=>{
     try{
 
-        const {friendReqId, action} = req.body; // things the frontend will send
+    const {friendReqId, action} = req.body; // things the frontend will send
+    
        const userId = req.user.id;  // to know who is logged in
        const friendship =  await Friendship.findById(friendReqId);
        console.log('friendship', friendship)
@@ -287,7 +292,7 @@ app.post('/friends/respondReq', auth, async (req,res)=>{
             return res.status(400).json({ error: 'Request is no longer pending.' });
         }
 
-        if( action === 'accept'){
+        if( action === 'accepted'){
             friendship.status = 'accepted';
             await friendship.save();
             
