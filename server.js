@@ -154,7 +154,9 @@ app.post('/login',async(req,res)=>{
                         return res.status(400).json({ error: 'Invalid credentials.' });
                     }
                     const token = jwt.sign({id:user._id.toString()}, JWT_SECRET);
-                      res.status(200).json({   token,
+                      res.status(200).json(
+            {
+            token,
             userId: user._id, 
             username: user.username  });
     } catch (error) {
@@ -198,7 +200,7 @@ try{
     app.get('/friends/getAllFriends', auth, async (req,res)=>{
 
         try{
-              const userId = req.user.id;
+            const userId = req.user.id;
             const friends = await Friendship.find({
             $or:[
                 
@@ -313,13 +315,6 @@ app.put('/friends/respondReq', auth, async (req,res)=>{
 });
 
 
-
-
-
-
-
-
-
 app.post('/createTask',auth, async(req,  res) => {
 
 try {
@@ -348,6 +343,7 @@ app.get('/userScore', auth, async (req, res)=>{
     
      const formattedUserData = {
       id: userData._id,
+      username: userData.username,
       level: userData.level,
       points: userData.points,
     };
