@@ -1,3 +1,6 @@
+require('dotenv').config();
+const connectDB = require('./config/db');
+
 const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt= require('bcryptjs');
@@ -5,8 +8,8 @@ const jwt = require('jsonwebtoken');
 
 // creating the server 
 const app = express();
-const PORT =  3000;
-const JWT_SECRET = 'your_secret_jwt_key'; 
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'your_secret_jwt_key';
 
 
 // middleware to understand the json bodies in the requests thats coming to the server
@@ -16,7 +19,7 @@ const cors = require('cors');
 app.use(cors());
 
 
-const MONGODB_URI = 'mongodb://localhost:27017/todos';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/todos';
 
 // schema
 const UserSchema = new mongoose.Schema({
@@ -463,15 +466,10 @@ app.delete('/deleteById/:id' ,auth, async(req , res)=>{
     }
 })
 
-
+connectDB();
 // connection 
-mongoose.connect(MONGODB_URI).then(()=>{
 
-    console.log('Connected to MongoDB');
-    app.listen(PORT, () => {
-        console.log(`Server is running on http://localhost:${PORT}`);
-    });
-}).catch(()=>{
-    console.error('Error connecting to MongoDB');
-})
+    app.listen(PORT, () => 
+        console.log(`Server is running on http://localhost:${PORT}`)
+    );
 
