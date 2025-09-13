@@ -1,13 +1,15 @@
-require('dotenv').config();
-const connectDB = require('./config/db');
 
 const express = require('express');
-const mongoose = require('mongoose');
-const bcrypt= require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const cors = require('cors');
+require('dotenv').config();
+const connectDB = require('./config/db');
+// middleware 
+const { auth } = require('./middleware/authMiddleware');
 
-// creating the server 
+// routes
+const todoRoutes = require('./routes/todos');
 const app = express();
+// creating the server 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'your_secret_jwt_key';
 
@@ -15,118 +17,23 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your_secret_jwt_key';
 // middleware to understand the json bodies in the requests thats coming to the server
 
 app.use(express.json());
-const cors = require('cors');
 app.use(cors());
+app.use( todoRoutes);
+
+// import models
+const bcrypt= require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
+const user = require('./models/User');
+const todo = require('./models/Todo');
+const friendship= require('./models/Friendships');
+const blacklistToken = require('./models/Blacklist-tokens');
+
+
+
 
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/todos';
-
-// schema
-const UserSchema = new mongoose.Schema({
-    username:{
-        type:String,
-        required:true
-    },
-    email:{
-        type:String,
-        required:true
-    },
-    password:{
-        type:String,
-        required:true
-    },
-    points:{
-        type:Number,
-        default:0
-    },
-    level:{
-        type:Number,
-        default:0
-    }
-})
-
-const TodoSchema = new mongoose.Schema({
-    task:{
-        type: String,
-        required: true
-    },
-    completed: {
-        type: Boolean,
-        default: false
-    },
-    user:{
-        type:mongoose.Schema.Types.ObjectId,
-        ref:'User',
-        required:true
-    },
-    pointsValue:{
-        type:Number,
-        default:3
-    },
-    createdAt:{
-        type:Date,
-        default:Date.now
-    }
-});
-
-const FriendshipSchema = new mongoose.Schema({
-    user:{
-        type:mongoose.Schema.Types.ObjectId,
-        ref:'User',
-        required:true
-    },
-    friend:{
-        type:mongoose.Schema.Types.ObjectId,
-        ref:'User',
-        required:true
-    },
-    status:{
-        type:String,
-        enum:['pending','accepted','rejected'],
-        default:'pending'
-    },
-    createdAt:{
-        type:Date,
-        default:Date.now
-    }
-});
-const BlacklistTokenSchema = new mongoose.Schema({
-    token: {
-        type: String,
-        required: true
-    },
- 
-    createdAt: {
-        type: Date,
-        default: Date.now,
-        index: { expires: '1d' } // Expires in 1 day
-    }
-});
-const User = mongoose.model('User', UserSchema)
-const Friendship = mongoose.model('Friendship', FriendshipSchema);
-const Todo = mongoose.model('Todo', TodoSchema);
-const BlacklistToken = mongoose.model('BlacklistToken', BlacklistTokenSchema);
-
-// JWT middleware 
-
-const auth = async (req,res, next)=>{
-    try {
-        const token = req.header('Authorization').replace('Bearer ', '');
-        console.log(token);
-
-        const isBlackListed = await BlacklistToken.findOne({token});
-        if(isBlackListed){
-            return res.status(401).json({ error: 'Token is blacklisted. Please authenticate.' });
-        }
-        const decoded = jwt.verify(token, JWT_SECRET);
-        console.log(decoded)
-        req.user = decoded;
-         next();
-    } catch (error) {
-        res.status(401).json({ error: 'Please authenticate.' });
-    }
-
-}
 
 // Auth ENDPOINTS //
 
@@ -134,7 +41,7 @@ app.post('/register', async (req,res)=>{
     try{
         const {username , email, password }=req.body;
         const hashedPass = await bcrypt.hash(password,8);
-        const newUser = new User({username,email, password:hashedPass , points:0, level:1});
+        const newUser = new user({username,email, password:hashedPass , points:0, level:1});
         await newUser.save();
         res.status(200).json({message:'user registered successfully'})
     }  catch (error) {
@@ -147,7 +54,7 @@ app.post('/login',async(req,res)=>{
     try{
 
         const {username,password}=req.body;
-        const user =await User.findOne({username});
+        const user =await user.findOne({username});
         console.log(user)
         if (!user){
              return res.status(400).json({ error: 'Invalid credentials.' });
@@ -186,7 +93,7 @@ app.post('/logout', auth, async (req, res) => {
 app.get('/friends/pendingReq', auth, async (req,res)=>{
 try{
 
-    const pendingReq = await Friendship.find({friend:req.user.id, status:'pending'}).populate('user','username');
+    const pendingReq = await friendship.find({friend:req.user.id, status:'pending'}).populate('user','username');
     const formattedResponse = pendingReq.map(reqItem => ({
         friendshipId: reqItem._id,
         username: reqItem.user.username,
@@ -200,11 +107,11 @@ try{
 }
 });
 
-    app.get('/friends/getAllFriends', auth, async (req,res)=>{
+app.get('/friends/getAllFriends', auth, async (req,res)=>{
 
         try{
             const userId = req.user.id;
-            const friends = await Friendship.find({
+            const friends = await friendship.find({
             $or:[
                 
                 {user:userId, status:'accepted' },
@@ -243,7 +150,7 @@ app.post('/friends/sendReq', auth, async (req,res)=>{
     try{
         const {friendUsername} = req.body;
         const userId = req.user.id;
-        const friend =  await User.findOne({username:friendUsername});
+        const friend =  await user.findOne({username:friendUsername});
 
         if(!friend){
             res.status(404).json({error:'User not found'})
@@ -252,7 +159,7 @@ app.post('/friends/sendReq', auth, async (req,res)=>{
             return res.status(400).json({error:'You cannot send a friend request to yourself'})
         }
 
-        const existingFriendReq = await Friendship.findOne({
+        const existingFriendReq = await friendship.findOne({
             $or:[
                 {user:userId, friend:friend._id},
                 {user:friend._id, friend:userId}
@@ -264,7 +171,7 @@ app.post('/friends/sendReq', auth, async (req,res)=>{
             res.status(404).json({error:'Friend request already sent or exists.'})
         }
 
-         const newFriendship = new Friendship({
+         const newFriendship = new friendship({
             user: userId,
             friend: friend._id,
             status: 'pending'
@@ -283,7 +190,7 @@ app.put('/friends/respondReq', auth, async (req,res)=>{
     const {friendReqId, action} = req.body; // things the frontend will send
     
        const userId = req.user.id;  // to know who is logged in
-       const friendship =  await Friendship.findById(friendReqId);
+       const friendship =  await friendship.findById(friendReqId);
        console.log('friendship', friendship)
          if(!friendship){
           return res.status(404).json({error:'Friend request not found'})
@@ -318,28 +225,11 @@ app.put('/friends/respondReq', auth, async (req,res)=>{
 });
 
 
-app.post('/createTask',auth, async(req,  res) => {
-
-try {
-    const {task} = req.body;
-    console.log('taskk',  {task} )
-    const newTodo = new Todo({
-        task,
-        user:req.user.id
-    });
-    const savedTodo = await newTodo.save();
-    res.status(201).json(savedTodo);
-
-} catch (error) {
-    res.status(500).json({error: 'Failed to create todo'});
-}
-
-})
 
 app.get('/userScore', auth, async (req, res)=>{
 
     try {
-        const userData = await User.findById(req.user.id );
+        const userData = await user.findById(req.user.id );
           if (!userData) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -357,114 +247,130 @@ app.get('/userScore', auth, async (req, res)=>{
   }
 });
 
-app.get('/allTasks', auth, async (req, res)=>{
+// app.get('/allTasks', auth, async (req, res)=>{
 
-    try {
-        const allToDos = await Todo.find({ user: req.user.id });
-        const formattedTodos = allToDos.map( toDoItem => ({
-              id:toDoItem._id,
-              task: toDoItem.task,
-              completed: toDoItem.completed,
-              pointsValue: toDoItem.pointsValue,
-              createdAt: toDoItem.createdAt
+//     try {
+//         const allToDos = await todo.find({ user: req.user.id });
+//         const formattedTodos = allToDos.map( toDoItem => ({
+//               id:toDoItem._id,
+//               task: toDoItem.task,
+//               completed: toDoItem.completed,
+//               pointsValue: toDoItem.pointsValue,
+//               createdAt: toDoItem.createdAt
 
-        }))
-        res.status(200).json(formattedTodos);
-    }catch(err){
-        res.status(401).json({error:err.message})
-    }
-});
+//         }))
+//         res.status(200).json(formattedTodos);
+//     }catch(err){
+//         res.status(401).json({error:err.message})
+//     }
+// });
+// app.post('/createTask',auth, async(req,  res) => {
 
-app.put('/taskById/:id', auth, async(req, res) => {
+// try {
+//     const {task} = req.body;
+//     // console.log('taskk',  {task} )
+//     const newTodo = new todo({
+//         task,
+//         user:req.user.id
+//     });
+//     const savedTodo = await newTodo.save();
+//     res.status(201).json(savedTodo);
 
-    try{
-        const {id} = req.params;
-        const {task} = req.body;
-        const updatedToDo = await Todo.findOneAndUpdate(  { _id: id, user: req.user.id }, {task}, {new:true});
-  // If no todo was found with that ID, send a 404 status.
-    if (!updatedToDo) {
-      return res.status(404).json({ error: 'Todo not found' });
-    }
-        res.status(200).json(updatedToDo);
-    } catch(err){
-        res.status(404).json({err:err.message})
-    }
+// } catch (error) {
+//     res.status(500).json({error: 'Failed to create todo'});
+// }
 
-})
+// })
+// app.put('/taskById/:id', auth, async(req, res) => {
 
-app.put('/taskById/:id/complete' , auth, async(req, res) => {
+//     try{
+//         const {id} = req.params;
+//         const {task} = req.body;
+//         const updatedToDo = await todo.findOneAndUpdate(  { _id: id, user: req.user.id }, {task}, {new:true});
+//   // If no todo was found with that ID, send a 404 status.
+//     if (!updatedToDo) {
+//       return res.status(404).json({ error: 'Todo not found' });
+//     }
+//         res.status(200).json(updatedToDo);
+//     } catch(err){
+//         res.status(404).json({err:err.message})
+//     }
 
-    try{
-        const {id} = req.params;
-        const completedToDo = await Todo.findOneAndUpdate(
-            {_id:id , user:req.user.id},
-            {completed:true},
-            {new:true}
-        );  
-        console.log('completedToDo', completedToDo)
+// })
 
-        if(!completedToDo){
-             console.log('completedToDo', completedToDo)
-            return res.status(404).json({error:'Todo not found'})
-        }
+// app.put('/taskById/:id/complete' , auth, async(req, res) => {
 
+//     try{
+//         const {id} = req.params;
+//         const completedToDo = await todo.findOneAndUpdate(
+//             {_id:id , user:req.user.id},
+//             {completed:true},
+//             {new:true}
+//         );  
+//         console.log('completedToDo', completedToDo)
 
-        const now = new Date();
-        const createdAt = completedToDo.createdAt;
-        console.log('createdAt', createdAt)
-        const hoursPassed = (now - createdAt) / (1000*60*60 ); // Convert milliseconds to hours
-        let pointsEarned = completedToDo.pointsValue;
-        const pointsToSubtract = Math.floor(hoursPassed / 3);
-        pointsEarned = Math.max(0,pointsEarned - pointsToSubtract)
-        console.log(`Task completed. Initial points: ${completedToDo.pointsValue}. Hours passed: ${hoursPassed.toFixed(2)}. Points subtracted: ${pointsToSubtract}. Points earned: ${pointsEarned}.`);
+//         if(!completedToDo){
+//              console.log('completedToDo', completedToDo)
+//             return res.status(404).json({error:'Todo not found'})
+//         }
 
 
+//         const now = new Date();
+//         const createdAt = completedToDo.createdAt;
+//         console.log('createdAt', createdAt)
+//         const hoursPassed = (now - createdAt) / (1000*60*60 ); // Convert milliseconds to hours
+//         let pointsEarned = completedToDo.pointsValue;
+//         const pointsToSubtract = Math.floor(hoursPassed / 3);
+//         pointsEarned = Math.max(0,pointsEarned - pointsToSubtract)
+//         console.log(`Task completed. Initial points: ${completedToDo.pointsValue}. Hours passed: ${hoursPassed.toFixed(2)}. Points subtracted: ${pointsToSubtract}. Points earned: ${pointsEarned}.`);
 
-const user = await User.findById(req.user.id);
-if(user){
-    const newPoints = user.points +pointsEarned;
-    let newLevel = user.level;
-        if(newPoints >= newLevel * 100){
-            newLevel ++;
-            console.log(`User ${user.username} leveled up to Level ${newLevel}!`);
-        }
-        await User.findByIdAndUpdate(req.user.id , {
-            $set:{
-                points:newPoints,
-                level:newLevel
-            }
-        })
-  const formattedUserData = {
-      id: user._id,
-      level: user.level,
-      points: user.points,
-    };
+
+
+// const user = await user.findById(req.user.id);
+// if(user){
+//     const newPoints = user.points +pointsEarned;
+//     let newLevel = user.level;
+//         if(newPoints >= newLevel * 100){
+//             newLevel ++;
+//             console.log(`User ${user.username} leveled up to Level ${newLevel}!`);
+//         }
+//         await user.findByIdAndUpdate(req.user.id , {
+//             $set:{
+//                 points:newPoints,
+//                 level:newLevel
+//             }
+//         })
+//   const formattedUserData = {
+//       id: user._id,
+//       level: user.level,
+//       points: user.points,
+//     };
     
-    res.status(200).json(formattedUserData);
+//     res.status(200).json(formattedUserData);
 
-}
-
-
-    } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+// }
 
 
-} );
+//     } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
 
-app.delete('/deleteById/:id' ,auth, async(req , res)=>{
 
-    try {
-        const {id}= req.params;
-        const deletedToDo = await Todo.findOneAndDelete({ _id: id, user: req.user.id });
-        if(!deletedToDo){
-            return res.status(404).json({error:'Todo not found'})
-        }
-        res.status(204).send();
-    } catch (err){
-            res.status(500).json({ error: err.message });
-    }
-})
+// } );
+
+// app.delete('/deleteById/:id' ,auth, async(req , res)=>{
+
+//     try {
+//         const {id}= req.params;
+//         const deletedToDo = await todo.findOneAndDelete({ _id: id, user: req.user.id });
+//         if(!deletedToDo){
+//             return res.status(404).json({error:'Todo not found'})
+//         }
+//         res.status(204).send();
+//     } catch (err){
+//             res.status(500).json({ error: err.message });
+//     }
+// }) 
 
 connectDB();
 // connection 
